@@ -19,7 +19,9 @@ args = parser.parse_args()
 
 # Variables section
 
+# Get the file argument
 file_list_path = args.file[0]
+# Make an empty list
 file_list = []
 
 # Script section
@@ -35,3 +37,7 @@ except NotADirectoryError:
         raise FileNotFoundError
     file_list.append(file_list_path)
 
+# Initialize the video class using the file list
+video = video.Video(files=file_list)
+
+video.encode()
