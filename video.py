@@ -6,6 +6,7 @@ import bitstring
 import numpy as np
 import glob
 import os
+# import multiprocessing
 
 
 class Video:
@@ -15,11 +16,12 @@ class Video:
 
         # Set up variables
         # Framing
-        self.__initial_resolution = (167, 240)  # x, y
+        self.__initial_resolution = (320, 240)  # x, y
         self.__final_resolution = (640, 480)  # x, y
-        self.__symbol_count = 35639
         self.__side_pad = 5
         self.__ref_size = 3
+        self.__symbol_count = (self.__initial_resolution[0] - self.__ref_size - (self.__side_pad * 2)) * \
+                              (self.__initial_resolution[1] - (self.__side_pad * 2))
 
         # Colors
         self.__background_color = np.array([39.6, 89.8, 96.7])
@@ -33,12 +35,6 @@ class Video:
         self.__data_end_px = (self.__initial_resolution[0] - self.__side_pad,
                               self.__initial_resolution[1] - self.__side_pad)
 
-    # Get the bit string representation of a file
-    def _get_bitstring(self, file):
-        with open(file) as file:
-            b = bitstring.BitArray(file)
-            return b.bin
-
     # Automate the encode process
     def encode(self):
         # Create an empty list for colors
@@ -46,32 +42,14 @@ class Video:
 
         # Iterate through the file path list
         for i in self.files:
-            print(f'loading file "{i}"...')
-            # Get the raw bit data of the current file and save the original just-in-case
-            bit_repr = self._get_bitstring(i)
-            # Chop into 3-bit or less segments and save separately
-            bit_repr_chopped = [bit_repr[i:i+1] for i in range(0, len(bit_repr), 1)]
-            print('done')
+            # Iterate through all files
+            print('creating bit list...')
 
-            # Iterate through all 3 or less bit segments
-            print('creating video...')
-            print('assigning value to bits...')
-            for d in bit_repr_chopped:
-                # Assign color to segment
-                if len(d) == 1:
-                    if d == '0':
-                        color = False
-                    elif d == '1':
-                        color = True
-                    else:
-                        print('ERROR', d)
-                        raise IOError('Not a 0 or 1')
-                else:
-                    print('ERROR', d)
-                    raise IOError('Not a 0 or 1')
+            with open(i) as file:
+                bs = bitstring.BitArray(file)
+                for d in range(len(bs)):
+                    color_array.append(bs[d])
 
-                # Append the color to the list of all colors
-                color_array.append(color)
             print('done')
 
         # Chop raw bits into frames
@@ -84,18 +62,21 @@ class Video:
 
         # Begin data encoding
         # Set initial values for the x and y position of the pixel, and initial value for the file name
-        x_pos = self.__data_start_px[0]
-        y_pos = self.__data_start_px[1]
         filename = 0
         state = False
 
         # Run though all the frame data
         print('making frames...')
         for d in parsed_array:
-            # Create a new frame
+            # Start of frame
+            # Set starter values
+            x_pos = self.__data_start_px[0]
+            y_pos = self.__data_start_px[1]
+
+            # Create blank image
             frame = np.zeros((self.__initial_resolution[1], self.__initial_resolution[0], 3))
 
-            # Set the background color
+            # Run through pixels and set background color for each
             for i in range(self.__initial_resolution[1]):
                 for b in range(self.__initial_resolution[0]):
                     frame[i, b] = self.__background_color
@@ -119,6 +100,7 @@ class Video:
 
             # Check each bit in the frame and set the pixel accordingly
             for i in d:
+                # Position limit checks
                 # Column limiter
                 if x_pos >= self.__data_end_px[0]:
                     x_pos = self.__data_start_px[0]
@@ -138,16 +120,21 @@ class Video:
                 # Update the x position every bit
                 x_pos += 1
 
-            # Resize the frame to 640x480
+            # Resize the frame to final resolution
             frame = cv2.resize(frame, self.__final_resolution, interpolation=cv2.INTER_NEAREST)
-            # Save it
+            # Save it & get rid of it
             cv2.imwrite(f'outputfiles/output{filename}.png', frame)
-            # Update the file name
+            del frame
+            # Increment the file name
             filename += 1
 
         print('done')
 
+        # Get rid of the bit lists to save memory
+        del parsed_array
+
         # Create a video
+        print('converting frames to video')
         image_list = []
         image_path_list = []
         for name in sorted(glob.glob('outputfiles/output*.png'), key=os.path.getctime):
@@ -164,6 +151,7 @@ class Video:
             os.remove(i)
 
         out.release()
+        print('done')
 
         print('Finished')
 
