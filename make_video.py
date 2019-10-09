@@ -12,7 +12,8 @@ import video
 
 # Set up the argument parser
 parser = argparse.ArgumentParser(description='Makes a recordable video from a file or folder')
-parser.add_argument('file', metavar='F', type=str, nargs='+', help='File or folder to encode')
+parser.add_argument('format', metavar='f', type=str, nargs='+', help='Video format (vhs / s-vhs)')
+parser.add_argument('file', metavar='F', type=str, nargs='+', help='File to encode')
 args = parser.parse_args()
 
 # End setup section
@@ -38,6 +39,6 @@ except NotADirectoryError:
     file_list.append(file_list_path)
 
 # Initialize the video class using the file list
-video = video.Video(files=file_list)
+video = video.Video(args.format[0], file_list)
 
 video.encode()

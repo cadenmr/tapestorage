@@ -6,22 +6,28 @@ import bitstring
 import numpy as np
 import glob
 import os
-# import multiprocessing
+import time
 
 
 class Video:
     # Take in a list of files if encoding
-    def __init__(self, files=None):
+    def __init__(self, format, files=None, file_out_name=None):
         self.files = files
+        self.__format = format
+        self.file_out = file_out_name
+
+        if format == 'vhs':
+            self.__initial_resolution = (213, 240)
+        elif format == 's-vhs':
+            self.__initial_resolution = (320, 480)
+        else:
+            raise ValueError('Format provided was not vhs or s-vhs')
 
         # Set up variables
         # Framing
-        self.__initial_resolution = (320, 240)  # x, y
         self.__final_resolution = (640, 480)  # x, y
         self.__side_pad = 5
         self.__ref_size = 3
-        self.__symbol_count = (self.__initial_resolution[0] - self.__ref_size - (self.__side_pad * 2)) * \
-                              (self.__initial_resolution[1] - (self.__side_pad * 2))
 
         # Colors
         self.__background_color = np.array([39.6, 89.8, 96.7])
@@ -35,30 +41,46 @@ class Video:
         self.__data_end_px = (self.__initial_resolution[0] - self.__side_pad,
                               self.__initial_resolution[1] - self.__side_pad)
 
+        # Speed
+        self.__framerate = 29.97
+
+        # Statistics
+        self.__symbol_count = self.__data_end_px[0] * self.__data_end_px[1]
+
+        self.__transfer_speed = (self.__symbol_count * self.__framerate) / 1e+6
+
     # Automate the encode process
     def encode(self):
-        # Create an empty list for colors
-        color_array = []
+        # Show some data
+        print(f'Format: {self.__format}')
+        print(f'Framerate: {self.__framerate}')
+        print(f'Bits per frame: {self.__symbol_count}')
+        print(f'Transfer Speed (mbps): {self.__transfer_speed}')
+        print('-------------------------------------- ')
 
         # Iterate through the file path list
         for i in self.files:
             # Iterate through all files
-            print('creating bit list...')
 
+            print('loading file...')
             with open(i) as file:
                 bs = bitstring.BitArray(file)
-                for d in range(len(bs)):
-                    color_array.append(bs[d])
-
             print('done')
 
         # Chop raw bits into frames
-        print('chopping bit list into frames...')
-        parsed_array = [color_array[i:i+self.__symbol_count] for i in range(0, len(color_array), self.__symbol_count)]
-        print('done')
+        print('chopping bits into frames...')
+        parsed_array = [bs[i:i+self.__symbol_count] for i in range(0, len(bs), self.__symbol_count)]
+        bslen = len(bs)
+        del bs
 
-        # Clean up, save memory
-        del color_array
+        time = round((len(parsed_array) / self.__framerate) / 60, ndigits=1)
+
+        print('done')
+        print('-----------------------------')
+        print(f'{bslen} bits')
+        print(f'need to make {len(parsed_array)} frames')
+        print(f'video will be {time} mins')
+        print('-----------------------------')
 
         # Begin data encoding
         # Set initial values for the x and y position of the pixel, and initial value for the file name
@@ -110,6 +132,7 @@ class Video:
                 if y_pos >= self.__data_end_px[1]:
                     y_pos = self.__data_start_px[1]
 
+
                 # 1 bit
                 if i:
                     frame[y_pos, x_pos] = np.array((255, 255,  255))
@@ -135,17 +158,14 @@ class Video:
 
         # Create a video
         print('converting frames to video')
+        out = cv2.VideoWriter('data.mov', cv2.VideoWriter_fourcc(*'mpeg'), self.__framerate, self.__final_resolution)
         image_list = []
         image_path_list = []
         for name in sorted(glob.glob('outputfiles/output*.png'), key=os.path.getctime):
             img = cv2.imread(name)
-            image_list.append(img)
+            out.write(img)
+            # image_list.append(img)
             image_path_list.append(name)
-
-        out = cv2.VideoWriter('data.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 29.97, self.__final_resolution)
-
-        for i in range(len(image_list)):
-            out.write(image_list[i])
 
         for i in image_path_list:
             os.remove(i)
@@ -155,10 +175,61 @@ class Video:
 
         print('Finished')
 
-    # def decode(self):
-    #     bits = []
-    #
-    #     if len(self.files) > 1:
-    #         raise IndexError('Can only input one file')
-    #
-    #     with open(self.files[0]) as data_file:
+    def decode(self):
+        stop_low = np.array([0, 92, 62])
+        stop_high = np.array([180, 205, 139])
+
+        video = cv2.VideoCapture(self.files)
+        frame_count = video.get(cv2.CAP_PROP_FRAME_COUNT)
+        x_pos = self.__data_start_px[0]
+        y_pos = self.__data_start_px[1]
+        data = []
+
+        for fr in range(int(frame_count)):
+            ret, frame = video.read()
+            frame = cv2.resize(frame, self.__initial_resolution, interpolation=cv2.INTER_NEAREST)
+            frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+            mask = cv2.inRange(frame_hsv, stop_low, stop_high)
+
+            # cv2.imshow('Video', frame)
+            # cv2.imshow('Mask', mask)
+
+            if ret:
+                while True:
+                    if x_pos >= self.__data_end_px[0]:
+                        x_pos = self.__data_start_px[0]
+                        y_pos += 1
+
+                    if y_pos >= self.__data_end_px[1]:
+                        y_pos = self.__data_start_px[1]
+                        break
+
+                    if mask[y_pos, x_pos] == 255:
+                        print('ERR')
+                        print(x_pos, y_pos)
+                        break
+
+                    symbol = frame[y_pos, x_pos, 0]
+
+                    if int(symbol) < (255/2):
+                        data.append(False)
+                    elif (255 / 2) < int(symbol) <= 255:
+                        data.append(True)
+                    else:
+                        raise ValueError('Range not within 255')
+
+                    x_pos += 1
+                    # print(data)
+
+                    # # print(data)
+                    # if cv2.waitKey(20) & 0xFF == ord('q'):
+                    #     break
+
+
+                # time.sleep(5)
+
+        cv2.destroyAllWindows()
+
+        with open(self.file_out, 'wb') as f:
+            f.write(bitstring.BitArray(data).tobytes())
