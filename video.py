@@ -158,7 +158,8 @@ class Video:
 
         # Create a video
         print('converting frames to video')
-        out = cv2.VideoWriter('data.mov', cv2.VideoWriter_fourcc(*'mpeg'), self.__framerate, self.__final_resolution)
+        # LOSSLESS: hfyu ,
+        out = cv2.VideoWriter('data.mp4', cv2.VideoWriter_fourcc(*'mp4v'), self.__framerate, self.__final_resolution)
         image_list = []
         image_path_list = []
         for name in sorted(glob.glob('outputfiles/output*.png'), key=os.path.getctime):
@@ -175,19 +176,24 @@ class Video:
 
         print('Finished')
 
+    # Image decoder function
     def decode(self):
-        stop_low = np.array([0, 92, 62])
-        stop_high = np.array([180, 205, 139])
+        # Low and high color break bounds
+        stop_low = np.array([0, 93, 73])
+        stop_high = np.array([180, 255, 151])
 
+        # Open the video source
         video = cv2.VideoCapture(self.files)
+        # Grab the frame count of video source
         frame_count = video.get(cv2.CAP_PROP_FRAME_COUNT)
-        x_pos = self.__data_start_px[0]
-        y_pos = self.__data_start_px[1]
         data = []
 
         for fr in range(int(frame_count)):
+            x_pos = self.__data_start_px[0]
+            y_pos = self.__data_start_px[1]
+
             ret, frame = video.read()
-            frame = cv2.resize(frame, self.__initial_resolution, interpolation=cv2.INTER_NEAREST)
+            # frame = cv2.resize(frame, self.__initial_resolution, interpolation=cv2.INTER_NEAREST)
             frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
             mask = cv2.inRange(frame_hsv, stop_low, stop_high)
@@ -201,35 +207,27 @@ class Video:
                         x_pos = self.__data_start_px[0]
                         y_pos += 1
 
-                    if y_pos >= self.__data_end_px[1]:
-                        y_pos = self.__data_start_px[1]
-                        break
-
                     if mask[y_pos, x_pos] == 255:
-                        print('ERR')
+                        print('BREAK')
                         print(x_pos, y_pos)
                         break
 
                     symbol = frame[y_pos, x_pos, 0]
+                    # print(symbol)
 
                     if int(symbol) < (255/2):
                         data.append(False)
+                        # print(False)
                     elif (255 / 2) < int(symbol) <= 255:
                         data.append(True)
+                        # print(True)
                     else:
                         raise ValueError('Range not within 255')
 
                     x_pos += 1
-                    # print(data)
 
-                    # # print(data)
-                    # if cv2.waitKey(20) & 0xFF == ord('q'):
-                    #     break
+        print(len(data))
 
-
-                # time.sleep(5)
-
-        cv2.destroyAllWindows()
 
         with open(self.file_out, 'wb') as f:
             f.write(bitstring.BitArray(data).tobytes())
