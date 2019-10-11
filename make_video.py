@@ -39,6 +39,6 @@ except NotADirectoryError:
     file_list.append(file_list_path)
 
 # Initialize the video class using the file list
-video = video.Video(args.format[0], file_list)
+video = video.Video(args.format[0], args.file[0])
 
 video.encode()

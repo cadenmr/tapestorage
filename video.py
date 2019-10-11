@@ -6,24 +6,25 @@ import bitstring
 import numpy as np
 import glob
 import os
-import time
 
 
 class Video:
     # Take in a list of files if encoding
-    def __init__(self, format, files=None, file_out_name=None):
+    def __init__(self, type_format, files=None, file_out_name=None):
         self.files = files
-        self.__format = format
+        self.__format = type_format
         self.file_out = file_out_name
 
-        if format == 'vhs':
+        # Set the frame resolution depending on format
+        if self.__format == 'vhs':
             self.__initial_resolution = (213, 240)
-        elif format == 's-vhs':
+        elif self.__format == 's-vhs':
             self.__initial_resolution = (320, 480)
         else:
             raise ValueError('Format provided was not vhs or s-vhs')
 
         # Set up variables
+
         # Framing
         self.__final_resolution = (640, 480)  # x, y
         self.__side_pad = 5
@@ -48,15 +49,18 @@ class Video:
         self.__symbol_count = self.__data_end_px[0] * self.__data_end_px[1]
         self.__transfer_speed = (self.__symbol_count * self._framerate) / 1e+6
 
-        # Initialize variables
+        # Initialize position counters
         self._x_pos = self.__data_start_px[0]
         self._y_pos = self.__data_start_px[1]
 
-        # Create the pointer but don't assign anything to save memory
+        # Create the frame pointer but don't assign anything to save memory
         self._frame = None
 
+        # Initial reference bar state
         self._bar_state = False
 
+    # This function resets the frame variables
+    # Intended to be run each new frame to create a blank slate
     def _reset_framevars(self):
         # Set cursor
         self._x_pos = self.__data_start_px[0]
@@ -69,7 +73,7 @@ class Video:
             for b in range(self.__initial_resolution[0]):
                 self._frame[i, b] = self.__background_color
 
-        # Create stripes
+        # Create stripe
         for i in range(self.__ref_line_start[0], self.__ref_line_end[0]):
             if self._bar_state:
                 if i % 2 == 0:
@@ -92,31 +96,12 @@ class Video:
         print(f'Framerate: {self._framerate}')
         print(f'Bits per frame: {self.__symbol_count}')
         print(f'Transfer Speed (mbps): {self.__transfer_speed}')
-        print('-------------------------------------- ')
+        print('--------------------------------------')
 
-        # Iterate through the file path list
-        for i in self.files:
-            # Iterate through all files
-
-            print('loading file...')
-            with open(i) as file:
-                bs = bitstring.BitArray(file)
-            print('done')
-
-        # Chop raw bits into frames
-        print('chopping bits into frames...')
-        # parsed_array = [bs[i:i+self.__symbol_count] for i in range(0, len(bs), self.__symbol_count)]
-        bslen = len(bs)
-
-        # time = round((len(parsed_array) / self._framerate) / 60, ndigits=1)
-        time = 'DISABLED'
-
+        print('loading file...')
+        with open(self.files) as file:
+            bs = bitstring.BitArray(file)
         print('done')
-        print('-----------------------------')
-        print(f'{bslen} bits')
-        print(f'need to make {len("abc")} frames')
-        print(f'video will be {time} mins')
-        print('-----------------------------')
 
         # Begin data encoding
         # Set initial values for the x and y position of the pixel, and initial value for the file name
@@ -155,15 +140,13 @@ class Video:
         print('done')
 
         # Create a video
-        print('converting frames to video')
-        # LOSSLESS: hfyu ,
-        out = cv2.VideoWriter('data.mov', cv2.VideoWriter_fourcc(*'hfyu'), self._framerate, self.__final_resolution)
-        image_list = []
+        print('converting frames to video...')
+        # LOSSLESS: hfyu
+        out = cv2.VideoWriter('data.avi', cv2.VideoWriter_fourcc(*'HFYU'), self._framerate, self.__final_resolution)
         image_path_list = []
         for name in sorted(glob.glob('outputfiles/output*.png'), key=os.path.getctime):
             img = cv2.imread(name)
             out.write(img)
-            # image_list.append(img)
             image_path_list.append(name)
 
         for i in image_path_list:
@@ -171,54 +154,53 @@ class Video:
 
         out.release()
         print('done')
-
         print('Finished')
 
     # Image decoder function
     def decode(self):
+        # Set the correct pixel offset based on format
+        if self.__format == 'vhs':
+            offset = 1
+        elif self.__format == 's-vhs':
+            offset = 0
+        else:
+            offset = 1
+
         stop_low = np.array([0, 93, 73])
         stop_high = np.array([180, 255, 151])
-
-        b_low = np.array([0, 0, 0])
-        b_high = np.array([1, 1, 1])
-
-        w_low = np.array([0, 0, 254])
-        w_high = np.array([1, 1, 255])
-
+        
         video = cv2.VideoCapture(self.files)
+        frame_count = video.get(cv2.CAP_PROP_FRAME_COUNT)
 
         # Main crunch
-        data = []
+        data = bitstring.BitArray()
         counter = 0
 
         while True:
             ret, frame = video.read()
 
-            x_pos = self.__data_start_px[0] + 1
+            x_pos = self.__data_start_px[0] + offset
             y_pos = self.__data_start_px[1]
 
             if ret:
                 image = cv2.resize(frame, self.__initial_resolution, interpolation=cv2.INTER_NEAREST)
                 image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-                b_mask = cv2.inRange(image_hsv, b_low, b_high)
-                w_mask = cv2.inRange(image_hsv, w_low, w_high)
                 mask_stop = cv2.inRange(image_hsv, stop_low, stop_high)
 
                 while True:
-                    if x_pos >= self.__data_end_px[0] + 1:
-                        x_pos = self.__data_start_px[0] + 1
+                    if x_pos >= self.__data_end_px[0] + offset:
+                        x_pos = self.__data_start_px[0] + offset
                         y_pos += 1
 
                     if mask_stop[y_pos, x_pos]:
-                        # print(counter)
                         counter += 1
                         break
 
-                    if b_mask[y_pos, x_pos]:
-                        data.append(False)
-                    elif w_mask[y_pos, x_pos]:
-                        data.append(True)
+                    if image[y_pos, x_pos, 0] >= 255 / 2:
+                        data.append(bin(True))
+                    elif image[y_pos, x_pos, 0] < 255 / 2:
+                        data.append(bin(False))
                     else:
                         break
 
@@ -227,6 +209,6 @@ class Video:
                 break
 
         with open(self.file_out, 'wb') as file:
-            file.write(bitstring.BitArray(data).tobytes())
+            file.write(data.tobytes())
 
         print('Complete')
